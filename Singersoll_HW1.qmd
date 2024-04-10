@@ -1,0 +1,333 @@
+---
+title: "Lab 1: NYT API"
+author: "Sofia Ingersoll"
+date: "2024-04-09"
+output: html_document
+---
+
+## Assignment 1
+
+(Due Tuesday 4/9 11:59pm) Reminder: Please suppress all long and extraneous output from your submissions (ex: lists of tokens).
+
+1.  Create a free New York Times account (<https://developer.nytimes.com/get-started>)
+
+```{r setup, include=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+library(jsonlite)  # convert results from API queries into R-friendly formats 
+library(tidyverse) # tidy
+library(tidytext)  # text data management and analysis
+library(ggplot2)   # plot word frequencies and publication dates
+library(SnowballC)
+
+# assign API key.  When you create a NYT Dev account, you will be given a key
+# stored in key.Rmd only found locally.
+API_KEY 
+```
+
+2.  Pick an interesting environmental key word(s) and use the {jsonlite} package to query the API. Pick something high profile enough and over a large enough time frame that your query yields enough articles for an interesting examination.
+
+**My Topic**: articles on Space tourism published during our class session. (short time period bc a lot of hits) *Inspo*: space is a part of our greater environment and I assume there are significant impacts in as a result of projects dedicated to space travel (i.e. takes a lot of resources to propel humans in hunks of metal into outer space).
+
+```{r base-url}
+# since the start of this class
+begin_date <- "20240401" 
+end_date <- "20240406"
+
+
+baseurl <- URLencode(paste0("http://api.nytimes.com/svc/search/v2/articlesearch.json?=qspacetourism",
+                            # term1, "%20", term2,
+                            # I played around with the time range and everything 
+                            "&begin_date=",begin_date,
+                            "&end_date=", end_date,
+                            "&facet_filter=true",
+                            "&api-key=", API_KEY))
+#examine our query url
+print(baseurl)
+```
+
+##### Let's make sure we have enough articles in this time period before jumping in!
+
+```{r initial-query}
+#run initial query
+initialQuery <- fromJSON(baseurl)
+
+# limit the number of articles returned per request
+# use this for the lab to find how many avaialbe hits are on my query so far to make sure how far to go thru the loop to collect everything
+maxPages <- round((initialQuery$response$meta$hits[1] / 10)-1)
+
+# since the start of this class, 108 articles have been posted on space tourism
+maxPages
+```
+
+87 is a good amount of information to query, let's load it! It may take a moment, so have some patience.
+
+```{r max-pages}
+pages <- list()
+#loop
+for(i in 0:maxPages){
+  nytSearch <- fromJSON(paste0(baseurl, "&page=",i), flatten = TRUE) %>% data.frame()
+  message("Retrieving page ", i)
+  pages[[i+1]] <- nytSearch 
+  Sys.sleep(20)
+}
+```
+
+It's super interesting the text correlation that the API made between the str `spacetourism` and the on-going genocide in Palestine. Originally, I was looking for fun articles related to space travel & the impacts of exploration. However, this connection that's been inadvertently made makes me want to pivot my search to contain articles only from the Washington and Foreign news deck to gauge a general sense of the nyt articles sentiments towards the atrocities that have and are unfolding. Also want to refine search in subsection_names to only politics and the Middle East.
+
+```{r bind df}
+#pages
+#bind the pages and create a tibble from nytDat
+nyt_df <- bind_rows(pages)
+
+#unique(nyt_df$headline.main)
+#str(nyt_df)
+head(nyt_df$response.docs.headline.main)
+
+# Check column names
+#colnames(nyt_df)
+
+#unique(nyt_df$news_desk)
+```
+
+3.  Recreate the publications per day and word frequency plots using the lead paragraph field. This time filter on the response.docs.news_desk variable to winnow out irrelevant results.
+
+-   Make some (at least 3) transformations to the corpus including: add context-specific stopword(s), stem a key term and its variants, remove numbers)
+
+```{r}
+# corpus 
+corpus <- tibble(text = nyt_df$response.docs.snippet[6]) 
+
+# Stem a key term and its variants
+# In my corpus, how often does Gaza appear?
+
+corpus %>%
+  mutate(stem = wordStem("^Gaza")) %>%
+  count(stem, sort = TRUE) 
+
+#split into substrings
+str_split(corpus,',') 
+
+#swap strings
+str_replace(corpus,'pinpoint precision',"thoughtless, unethical practices that endangered the lives of innocent people") 
+
+stop_the_complacency <- c("displayed",'pinpoint', 'precision',"Hours", "later")
+
+# Remove custom stop words from the corpus & replace with space
+corpus %>%
+  mutate(text = str_replace_all(text, paste(stop_the_complacency, collapse = "|"), "")) 
+```
+
+## Word Frequency Plot
+
+```{r tokenize}
+nytDat <- nyt_df
+
+#load stop words
+data(stop_words)
+#stop_words
+#use tidytext::unnest_tokens to put in tidy form.  
+#If there are some types of news that we'd like to exclude, we can filter()
+tokenized <- nytDat %>%
+  filter(response.docs.news_desk !=c("Washington","Foreign")) %>%
+  filter(response.docs.subsection_name !=c("Politics","Middle East")) %>%
+  unnest_tokens(word, response.docs.lead_paragraph) #word is the new column, paragraph is the source
+
+
+# stop word anti_join
+tokenized <- tokenized %>%
+  anti_join(stop_words)
+
+#remove all numbers
+clean_tokens <- str_remove_all(tokenized$word, "[:digit:]") 
+
+#remove s contractions
+clean_tokens <- gsub("’s", '', clean_tokens)
+
+tokenized$clean <- clean_tokens
+
+#remove the empty strings
+tib <-subset(tokenized, clean!="")
+
+#reassign
+tokenized <- tib
+
+
+# this is commented out for rendering because it displays all of the tokenized words
+#tokenized[,"word"]
+
+# let's visualize these
+tokenized %>%
+  
+  count(word, sort = TRUE) %>%
+  
+  filter(n > 10) %>%
+  
+  mutate(word = reorder(word, n)) %>%
+  
+  ggplot(aes(n, word)) +
+  
+  geom_col(aes(fill = word)) +
+  labs(y = NULL,
+       title = "Word Frequency in Articles Containing 'spacetourism'",
+       subtitle = "News Desk Topics: Washington & Foreign \n 04/04-04/08 (2024)",
+       x = "Number of Publications",
+       ) +
+  theme_classic() +
+  
+  theme(
+    
+    title = element_text(size = 14,
+                         hjust = 0.5),
+    
+    legend.position = "none"
+    
+  ) 
+```
+
+## Publications per day
+
+```{r date-plot}
+FreePalestine <- c("#ad3838","#db6161","#ece4e4","#75b855","#157241", "black")
+
+tokenized %>%
+  mutate(response.docs.pub_day=gsub("T.*","", response.docs.pub_date)) %>% 
+  
+  group_by(response.docs.pub_day) %>%
+  
+  summarise(count=n()) %>%
+  
+  ggplot() +
+  
+  geom_bar(aes(x=fct_reorder(response.docs.pub_day, count), y=count, fill = response.docs.pub_day), stat="identity") +
+  
+  scale_fill_manual(values = FreePalestine) +
+  
+  labs(title = "Publications Per Day Containing 'spacetourism'",
+       subtitle = "News Desk Topics: Washington & Foreign \n 04/04-04/08 (2024)",
+       y = "Number of Publications",
+       x = ' ') +
+  
+  theme_classic() +
+  
+  theme(
+    
+    title = element_text(size = 14,
+                         hjust = 0.5),
+    
+   # subtitle = element_text(size = 12,
+    #                        hjust = 0.5),
+    
+    legend.position = "none"
+  
+    
+  ) +
+  
+  coord_flip() 
+```
+
+4.  Recreate the publications per day and word frequency plots using the headlines variable (response.docs.headline.main). Compare the distributions of word frequencies between the first paragraph and headlines. Do you see any difference?
+
+Comparing the distribution of word frequencies between the first paragraph and headlines plots, there are a lot of similarities in words. Where they differ most is in their tone. The headlines have more charged language. However, the headlines contain more topic related content, whereas the first paragraph contained a bigger blend of art and American politics. I suspect the art articles likely relates peaceful protest art in response to the genocide in Palestine. However, it is very likely it is also about a super cool art exhibit on spacetourism. 
+```{r}
+#use tidytext::unnest_tokens to put in tidy form.  
+#If there are some types of news that we'd like to exclude, we can filter()
+tokenized <- nytDat %>%
+  filter(response.docs.news_desk !=c("Washington","Foreign")) %>%
+  filter(response.docs.subsection_name !=c("Politics","Middle East")) %>%
+  unnest_tokens(word, response.docs.headline.main) #word is the new column, paragraph is the source
+
+
+# this is commented out for rendering because it displays all of the tokenized words
+#tokenized[,"word"]
+```
+
+## Word Frequency Plot
+
+```{r word-freq-plot-2}
+# load stop words
+data(stop_words)
+#stop_words
+# stop word anti_join
+tokenized <- tokenized %>%
+  
+  anti_join(stop_words)
+  
+
+# inspect the list of tokens (words)
+#tokenized$word
+
+# remove all numbers
+clean_tokens <- str_remove_all(tokenized$word, "[:digit:]") 
+
+# remove s contractions
+clean_tokens <- gsub("’s", '', clean_tokens)
+
+tokenized$clean <- clean_tokens
+
+# remove the empty strings
+tib <-subset(tokenized, clean!="")
+
+# reassign
+tokenized <- tib
+
+# visualize
+tokenized %>%
+  count(clean, sort = TRUE) %>%
+  filter(n > 5) %>% 
+  mutate(clean = reorder(clean, n)) %>%
+  ggplot(aes(n, clean)) +
+   geom_col(aes(fill = clean)) +
+  
+  labs(y = NULL,
+       title = "Word Frequency in Articles Containing 'spacetourism'",
+       subtitle = "News Desk Topics: Washington & Foreign \n 04/04-04/08 (2024)",
+       x = "Number of Publications",
+       ) +
+  
+  theme_classic() +
+  
+  theme(
+    
+    title = element_text(size = 14,
+                         hjust = 0.5),
+    
+    legend.position = "none"
+    
+  ) 
+```
+
+## Publications per day
+
+```{r date-plot-2}
+tokenized %>%
+  mutate(response.docs.pub_day=gsub("T.*","", response.docs.pub_date)) %>% 
+  
+  group_by(response.docs.pub_day) %>%
+  
+  summarise(count=n()) %>%
+  
+  ggplot() +
+  
+  geom_bar(aes(x=fct_reorder(response.docs.pub_day, count), y=count, fill = response.docs.pub_day), stat="identity") +
+  
+  scale_fill_manual(values = FreePalestine) +
+  
+  labs(title = "Publications Per Day Containing Spacetourism",
+       subtitle = "News Desk Topics: Washington & Foreign, 04/04-04/08 (2024)",
+       y = "Number of Publications",
+       x = ' ') +
+  
+  
+  theme_classic() +
+  
+  theme(
+    
+    title = element_text(size = 14,
+                         hjust = 0.5),
+    
+    legend.position = "none"
+    
+  ) +
+  
+  coord_flip() 
+```
