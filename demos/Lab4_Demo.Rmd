@@ -1,0 +1,166 @@
+---
+title: "Lab 4_Demo"
+author: "Mateo Robbins"
+date: "2024-04-22"
+output: html_document
+---
+
+```{r packages, include = FALSE}
+# naive-bayes
+library(discrim) 
+library(tidytext)
+library(tidyverse)
+library(tidymodels)
+library(textrecipes)
+```
+
+This data set includes more possible predictors than the text alone, but for this model we will only use the text variable
+```{r data}
+
+urlfile ="https://raw.githubusercontent.com/MaRo406/EDS-231-text-sentiment/main/data/climbing_reports_model_dat.csv"
+incidents_df<-readr::read_csv(url(urlfile),
+                              show_col_types = FALSE)
+```
+
+Now we'll split our data into training and test portions
+
+```{r split-data}
+set.seed(1234)
+
+indicents2class <- incidents_df %>% 
+  mutate(fatal = factor(if_else(
+    is.na(Deadly),
+    "non-fatal",
+    "fatal"
+  )))
+
+
+# this shows us class imbalance the could introduce bias 
+table(indicents2class$fatal)
+
+incidents_split <- initial_split(indicents2class,
+                                 prop = 0.8,
+                                 strata = fatal)
+# training data
+incidents_train <- training(incidents_split)
+# testing data
+incidents_test <- testing(incidents_split)
+```
+
+We use recipe() to specify the predictor and outcome variables and the data.
+Next we add some familiar pre-processing steps on our Text variable: tokenize to word level, filter to the most common words, and calculate tf-idf.
+
+```{r text_model_spec, pre-process}
+text_spec <- recipe(fatal ~ Text, 
+                     incidents_train
+                     ) %>% 
+  # tokenize the data
+  step_tokenize(Text) %>% 
+  # filter frequency to simplyfy data
+  # give me 1000 most frequent words in all of the articles
+  step_tokenfilter(Text, max_tokens = 1000) %>% 
+  # INVERSE DOCUMENT THEORY IDT
+  # BETA AND THETA BABY
+  # this removes stop words and considers domain specific stop words
+  step_tfidf(Text)
+
+text_spec
+```
+
+
+Create  tidymodels workflow to combine the modeling components
+
+```{r workflow}
+incidents_wf <- workflow() %>% 
+  add_recipe(text_spec)
+```
+
+```{r nb-spec}
+nb_spec <- naive_Bayes() %>% 
+  set_mode("classification") %>% 
+  set_engine("naivebayes")
+
+nb_spec
+```
+
+Now we are ready to add our model to the workflow and fit it to the training data
+
+```{r fit-model}
+nb_fit <- incidents_wf %>% 
+  add_model(nb_spec) %>% 
+  fit(data = incidents_train)
+```
+Next up is model evaluation. We'll stretch our training data further and use resampling to evaluate our naive Bayes model. Here we create 10-fold cross-validation sets, and use them to estimate performance.
+
+```{r cv_folds}
+set.seed(999)
+
+# default is 10 fold
+incidents_folds <- vfold_cv(incidents_train)
+```
+
+```{r nb-workflow}
+# DOUBLE CHECK THIS PART AND COMPARE WITH NB_FIT RESULTS
+nb_wf <- workflow() %>% 
+incidents_wf %>% 
+  add_model(nb_spec) %>% 
+  fit(data = incidents_train)
+
+
+nb_result <- fit_resamples(
+  nb_fit, 
+  incidents_folds,
+  control = control_resamples(save_pred = TRUE)
+) 
+  
+  
+```
+
+To estimate its performance, we fit the model to each of the resampled folds, and then evaluate on the heldout part of each resampled fold.
+
+```{r fit-resamples}
+nb_metrics <- collect_metrics(nb_result)
+
+nb_pred <- collect_predictions(nb_result)
+
+nb_metrics
+```
+
+Extract the relevant information using collect_metrics() and collect_predictions() and examine the performance metrics.
+
+```{r performance}
+nb_pred %>% 
+  group_by(id) %>% 
+  # provide true case
+  roc_curve(truth = fatal,
+            # & predictions
+            .pred_fatal) %>% 
+  autoplot() +
+  # Plot resamples individually 
+  labs(subtitle = "Resamples",
+       title = "ROC Curve for Climbing Incident Reports")
+```
+
+We'll use two performance metrics: accuracy and ROC AUC.
+Accuracy is the proportion of the data that is predicted correctly. 
+The ROC curve plots the true positive rate against the false positive rate; AUC closer to 1 indicates a better-performing model, while AUC closer to 0.5 indicates a model that does no better than random guessing.
+
+Here, we see it's really affected by the class imbalance
+
+```{r performance-plot}
+confusion_matrix <- conf_mat_resampled(nb_result,
+                                       tidy = FALSE) %>% 
+  autoplot("heatmap")
+
+confusion_matrix
+```
+
+Another model method involves the confusion matrix. A confusion matrix tabulates a model's false positives and false negatives for each class.
+
+```{r confusion-matrix}
+
+```
+
+```{r null-model}
+
+```
