@@ -1,0 +1,323 @@
+---
+title: "Lab3"
+author: "Sofia Ingersoll"
+date: "2024-04-17"
+output: html_document
+---
+### Assignment Lab 3:
+
+Due next week: April 23 at 11:59PM
+
+For this assignment you'll use the article data you downloaded from Nexis Uni in Week 2.
+
+### Explore your data and conduct the following analyses:
+
+### Set up
+```{r setup, include=FALSE}
+# Set the working directory to the folder containing the .docx files
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+library(LexisNexisTools)
+library(tidyverse)
+library(tidytext)
+library(textdata)
+library(stringr)
+library(dplyr)
+library(readr)
+library(here)
+library(gt)
+
+
+knitr::opts_knit$set(root.dir = here("Nexis", "tiktokban"))
+```
+
+### Load Articles 
+```{r load_articles}
+# List all .docx files in the directory
+post_files <- list.files(pattern = ".docx",
+                         full.names = TRUE,
+                         recursive = TRUE, 
+                         ignore.case = TRUE)
+
+# lnt object
+dat <- lnt_read(post_files)
+
+# pull out respective table slots
+meta_df <- dat@meta
+articles_df <- dat@articles
+paragraphs_df <- dat@paragraphs
+
+dat2 <- tibble(
+ id = articles_df$ID,
+ date = meta_df$Date,
+ headline = meta_df$Headline,
+ text = articles_df$Article
+)
+
+# first let's make the object
+corpus <- corpus(x = post_files,
+                 text_field = "text")
+```
+
+```{r set_up2, messages = FALSE}
+library(tm)
+library(gt)
+library(textdata)
+library(reshape2)
+library(quanteda)
+library(tidyverse)
+library(ldatuning)
+library(topicmodels)
+
+```
+
+1.  Create a corpus from your articles.
+
+```{r corpus, tokens}
+tokens(corpus)
+# this removes symbols and dashes 
+toks <- tokens(corpus,
+               remove_punct = TRUE,
+               remove_numbers = TRUE,
+               remove_url = TRUE)
+
+# create collection of stopword patterns to remove
+#add_stops <- stopwords(kind = quanteda_options("language_stopwords"))
+
+# Create collection of English stopwords
+add_stops <- stopwords("en")
+
+
+# remove stop words
+toks1 <- tokens_select(toks,
+                       pattern = add_stops,
+                       selection = "remove")
+```
+
+
+2.  Clean the data as appropriate.
+
+```{r clean_data}
+# convert our df to lower case words
+dfm <- dfm(toks1, tolower = TRUE) %>% 
+  # convert our df to reduce size of data
+  dfm_trim( # words retained in matrix need to appear at least twice
+    min_docfreq = 2)
+
+# need rows not entirely zero in matrix
+# or else next operations won't work
+# let's remove sparse matricies
+sel_idx <- slam::row_sums(dfm)>0
+
+# removes all empty documents from data base
+dfm <- dfm[sel_idx,]
+```
+
+```{r identify_k}
+# give it matrix, range of values to try, 
+topic_amount <- FindTopicsNumber(dfm,
+                                 topics = seq(from = 2,
+                                              to = 20,
+                                              by = 1),
+                                 metrics = c("CaoJuan2009", "Deveaud2014"),
+                                 method = "Gibbs",
+                                 verbos = TRUE)
+
+# 4 is a good amount
+# we want the smallest minimize value that matches the highest maximize value
+FindTopicsNumber_plot(topic_amount)
+```
+
+3.  Run three models (i.e. with 3 values of k) and select the overall best value for k (the number of topics) - include some justification for your selection: theory, FindTopicsNumber() optimization metrics, interpretability, LDAvis. Select the best single value of k.
+
+```{r LDA_model_1, k_2}
+k <- 2
+
+# topicModel function
+topicModel_k2 <- LDA(dfm,
+                     # number of topics
+                     k,
+                     # method: topic distribution and word distribution in topics
+                     method = "Gibbs",
+                     # good starting point for most purposes
+                     # if more iterations are needed
+                     # how much are things changing each iteration
+                     # go until it platues and can't learn more from interactions
+                     control = list(iter = 1000, verbose = 25)
+                     # update what it's doing every 25 iteration
+                     # very useful for large, slow models to ensure it's working
+                     )
+#topicModel_k2
+```
+
+```{r top_terms_topic, k_2}
+results<- posterior(topicModel_k2)
+
+attributes(results)
+
+# isolating beta using tidytext, not parameter beta
+# distrib of terms in topic 
+beta <- results$terms
+# distrib of topics in articles 
+theta <- results$topics
+
+vocab <- colnames(beta)
+
+dim(beta)
+dim(theta)
+
+terms(topicModel_k4, 10)
+```
+
+
+
+
+### k = 4
+```{r model_2, k_4}
+k <- 4
+
+# topicModel function
+topicModel_k4 <- LDA(dfm,
+                     # number of topics
+                     k,
+                     # method: topic distribution and word distribution in topics
+                     method = "Gibbs",
+                     # good starting point for most purposes
+                     # if more iterations are needed
+                     # how much are things changing each iteration
+                     # go until it platues and can't learn more from interactions
+                     control = list(iter = 1000, verbose = 25)
+                     # update what it's doing every 25 iteration
+                     # very useful for large, slow models to ensure it's working
+                     )
+
+#topicModel_k4
+```
+
+```{r top_terms_topic, k_4}
+results<- posterior(topicModel_k4)
+
+attributes(results)
+
+# isolating beta using tidytext, not parameter beta
+# distrib of terms in topic 
+beta <- results$terms
+# distrib of topics in articles 
+theta <- results$topics
+
+vocab <- colnames(beta)
+
+dim(beta)
+dim(theta)
+
+terms(topicModel_k4, 10)
+```
+
+
+### k = 6
+```{r model_3, k_6}
+k <- 6
+
+# topicModel function
+topicModel_k6 <- LDA(dfm,
+                     # number of topics
+                     k,
+                     # method: topic distribution and word distribution in topics
+                     method = "Gibbs",
+                     # good starting point for most purposes
+                     # if more iterations are needed
+                     # how much are things changing each iteration
+                     # go until it platues and can't learn more from interactions
+                     control = list(iter = 1000, verbose = 25)
+                     # update what it's doing every 25 iteration
+                     # very useful for large, slow models to ensure it's working
+                     )
+
+#topicModel_k6
+```
+
+```{r top_terms_topic, k_6}
+results<- posterior(topicModel_k6)
+
+attributes(results)
+
+# isolating beta using tidytext, not parameter beta
+# distrib of terms in topic 
+beta <- results$terms
+# distrib of topics in articles 
+theta <- results$topics
+
+vocab <- colnames(beta)
+
+dim(beta)
+dim(theta)
+
+terms(topicModel_k4, 10)
+```
+4.  Plot the top terms in each topic and the distribution of topics across a sample of the documents (constrained by what looks good in the plot).
+
+```{r top_terms_plot, k_}
+# tidy topics matrix for plotting
+topics <- tidy(topicModel_k4,
+               matrix = "beta")
+
+top_terms <- topics %>% 
+  group_by(topic) %>% 
+  top_n(10, beta) %>% 
+  ungroup() %>% 
+  arrange(topic, -beta)
+
+top_terms
+
+top_terms %>% 
+  mutate(term = reorder_within(term,
+                               beta,
+                               topic,
+                               sep = "")) %>% 
+  ggplot(aes(x = term,
+             y = beta,
+             fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~topic, scales = "free_y") +
+  scale_x_reordered() +
+  coord_flip()
+```
+
+```{r topic_distribution}
+#specify # of examples to inspect
+example_ids <- c(1:5)
+n <- length(example_ids)
+
+
+# get topic proportions from example documents
+example_props <- theta[example_ids, ]
+topic_names <- colnames(example_props) 
+
+#combine example topics with identifiers and melt to plotting form
+# get into plotting form
+viz_df <- melt(cbind(data.frame(example_props),
+                     document = factor(1:n),
+                     variable.name = 'topic',
+                     id.vars = "document"
+                     ))
+
+head(viz_df,3) %>% 
+  gt()
+
+ggplot(data = viz_df,
+       aes(variable,
+           value,
+           fill = document),
+       ylab = "Proportion") +
+  geom_bar(stat = "identity",
+           show.legend = FALSE) +
+  coord_flip() +
+  facet_wrap(~document,
+             ncol = n) +
+  theme_bw()
+```
+
+
+5.  Take a stab at interpreting the resulting topics. What are the key themes discussed in the articles in your data base?
+
+

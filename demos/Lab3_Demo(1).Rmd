@@ -238,7 +238,7 @@ topic_names <- apply(topic_words,
 
 We can explore the theta matrix, which contains the distribution of each topic over each document.
 
-```{r topic_dists}
+```{r topic_distribution}
 #specify # of examples to inspect
 example_ids <- c(1:5)
 n <- length(example_ids)
