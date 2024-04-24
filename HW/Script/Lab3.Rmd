@@ -13,12 +13,13 @@ For this assignment you'll use the article data you downloaded from Nexis Uni in
 ### Explore your data and conduct the following analyses:
 
 ### Set up
-```{r setup, include=FALSE}
+```{r setup}
 # Set the working directory to the folder containing the .docx files
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 
 library(LexisNexisTools)
 library(tidyverse)
+library(quanteda)
 library(tidytext)
 library(textdata)
 library(stringr)
@@ -27,6 +28,7 @@ library(readr)
 library(here)
 library(gt)
 
+set.seed(99)
 
 knitr::opts_knit$set(root.dir = here("Nexis", "tiktokban"))
 ```
@@ -59,12 +61,11 @@ corpus <- corpus(x = post_files,
                  text_field = "text")
 ```
 
-```{r set_up2, messages = FALSE}
+```{r set_up2, message = FALSE}
 library(tm)
 library(gt)
 library(textdata)
 library(reshape2)
-library(quanteda)
 library(tidyverse)
 library(ldatuning)
 library(topicmodels)
@@ -73,7 +74,7 @@ library(topicmodels)
 
 1.  Create a corpus from your articles.
 
-```{r corpus, tokens}
+```{r corpus, tokens, message = FALSE}
 tokens(corpus)
 # this removes symbols and dashes 
 toks <- tokens(corpus,
@@ -86,11 +87,12 @@ toks <- tokens(corpus,
 
 # Create collection of English stopwords
 add_stops <- stopwords("en")
+smart_stops <- stopwords("SMART")
 
 
 # remove stop words
 toks1 <- tokens_select(toks,
-                       pattern = add_stops,
+                       pattern = c(add_stops, smart_stops),
                        selection = "remove")
 ```
 
@@ -113,6 +115,16 @@ sel_idx <- slam::row_sums(dfm)>0
 dfm <- dfm[sel_idx,]
 ```
 
+3.  Run three models (i.e. with 3 values of k) and select the overall best value for k (the number of topics) - include some justification for your selection: theory, FindTopicsNumber() optimization metrics, interpretability, LDAvis. Select the best single value of k.
+
+For my selection of articles, the best number of topics, k, is 4. As observed below in the plot output of `FindTopicsNumber()` the k value 4 displays the most optmized metrics. 
+
+Guess on the 4 topic themes:
+- Topic 1: Tik toks influences on the market & public investments
+- Topic 2: Increase in political awareness and its affects 
+- Topic 3: Public related concerns
+- Topic 4: Gov. biggest concerns about tik tok
+
 ```{r identify_k}
 # give it matrix, range of values to try, 
 topic_amount <- FindTopicsNumber(dfm,
@@ -127,53 +139,7 @@ topic_amount <- FindTopicsNumber(dfm,
 # we want the smallest minimize value that matches the highest maximize value
 FindTopicsNumber_plot(topic_amount)
 ```
-
-3.  Run three models (i.e. with 3 values of k) and select the overall best value for k (the number of topics) - include some justification for your selection: theory, FindTopicsNumber() optimization metrics, interpretability, LDAvis. Select the best single value of k.
-
-```{r LDA_model_1, k_2}
-k <- 2
-
-# topicModel function
-topicModel_k2 <- LDA(dfm,
-                     # number of topics
-                     k,
-                     # method: topic distribution and word distribution in topics
-                     method = "Gibbs",
-                     # good starting point for most purposes
-                     # if more iterations are needed
-                     # how much are things changing each iteration
-                     # go until it platues and can't learn more from interactions
-                     control = list(iter = 1000, verbose = 25)
-                     # update what it's doing every 25 iteration
-                     # very useful for large, slow models to ensure it's working
-                     )
-#topicModel_k2
-```
-
-```{r top_terms_topic, k_2}
-results<- posterior(topicModel_k2)
-
-attributes(results)
-
-# isolating beta using tidytext, not parameter beta
-# distrib of terms in topic 
-beta <- results$terms
-# distrib of topics in articles 
-theta <- results$topics
-
-vocab <- colnames(beta)
-
-dim(beta)
-dim(theta)
-
-terms(topicModel_k4, 10)
-```
-
-
-
-
-### k = 4
-```{r model_2, k_4}
+```{r LDA_model_1, k_4}
 k <- 4
 
 # topicModel function
@@ -190,8 +156,6 @@ topicModel_k4 <- LDA(dfm,
                      # update what it's doing every 25 iteration
                      # very useful for large, slow models to ensure it's working
                      )
-
-#topicModel_k4
 ```
 
 ```{r top_terms_topic, k_4}
@@ -212,14 +176,12 @@ dim(theta)
 
 terms(topicModel_k4, 10)
 ```
-
-
-### k = 6
-```{r model_3, k_6}
-k <- 6
+### k = 5
+```{r model_2, k_2}
+k <- 2
 
 # topicModel function
-topicModel_k6 <- LDA(dfm,
+topicModel_k5 <- LDA(dfm,
                      # number of topics
                      k,
                      # method: topic distribution and word distribution in topics
@@ -232,12 +194,10 @@ topicModel_k6 <- LDA(dfm,
                      # update what it's doing every 25 iteration
                      # very useful for large, slow models to ensure it's working
                      )
-
-#topicModel_k6
 ```
 
-```{r top_terms_topic, k_6}
-results<- posterior(topicModel_k6)
+```{r top_terms_topic, k_2}
+results<- posterior(topicModel_k5)
 
 attributes(results)
 
@@ -252,18 +212,57 @@ vocab <- colnames(beta)
 dim(beta)
 dim(theta)
 
-terms(topicModel_k4, 10)
+terms(topicModel_k5, 10)
+```
+### k = 3
+```{r model_3, k_3}
+k <- 3
+
+# topicModel function
+topicModel_k3 <- LDA(dfm,
+                     # number of topics
+                     k,
+                     # method: topic distribution and word distribution in topics
+                     method = "Gibbs",
+                     # good starting point for most purposes
+                     # if more iterations are needed
+                     # how much are things changing each iteration
+                     # go until it platues and can't learn more from interactions
+                     control = list(iter = 1000, verbose = 25)
+                     # update what it's doing every 25 iteration
+                     # very useful for large, slow models to ensure it's working
+                     )
+```
+
+```{r top_terms_topic, k_3}
+results<- posterior(topicModel_k3)
+
+attributes(results)
+
+# isolating beta using tidytext, not parameter beta
+# distrib of terms in topic 
+beta <- results$terms
+# distrib of topics in articles 
+theta <- results$topics
+
+vocab <- colnames(beta)
+
+dim(beta)
+dim(theta)
+
+terms(topicModel_k3, 10)
 ```
 4.  Plot the top terms in each topic and the distribution of topics across a sample of the documents (constrained by what looks good in the plot).
 
-```{r top_terms_plot, k_}
+```{r top_terms_plot, k_4}
 # tidy topics matrix for plotting
 topics <- tidy(topicModel_k4,
                matrix = "beta")
 
 top_terms <- topics %>% 
   group_by(topic) %>% 
-  top_n(10, beta) %>% 
+  top_n(8, beta) %>% 
+ # slice_max(n, n = 5) %>% 
   ungroup() %>% 
   arrange(topic, -beta)
 
@@ -317,7 +316,17 @@ ggplot(data = viz_df,
   theme_bw()
 ```
 
-
 5.  Take a stab at interpreting the resulting topics. What are the key themes discussed in the articles in your data base?
 
+Guess on the 4 topic themes:
+- Topic 1: Tik toks influences on the market & public investments
+cfius, meme, market, digital were the biggest indicators for me this was likely related the DOGGE coin area, robinhood, & that one time Gamestop was highly invested in by the public.
 
+- Topic 2: Increase in political awareness and its affects 
+social, investment, anaylsis, sanction, and study made me think about the increased political activism and organization that has flourished because of tik tok and the concerns that politicians may have related to that.
+
+- Topic 3: Public related concerns
+media, china, forgein, comparative, government this made me think of our nation's leader's concerns about China influencing U.S. citizens.
+
+- Topic 4: Gov. biggest concerns about tik tok
+trade, chinese, privacy, international to me indicates these are articles related to the biggest concerns amongst politicians regarding national security.
