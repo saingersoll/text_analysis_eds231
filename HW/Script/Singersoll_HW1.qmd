@@ -21,7 +21,8 @@ library(SnowballC)
 
 # assign API key.  When you create a NYT Dev account, you will be given a key
 # stored in key.Rmd only found locally.
-API_KEY 
+#API_KEY 
+API_KEY <- "VZGa9AlN2P8Yk84yiJgiSXRww0tpzPig"
 ```
 
 2.  Pick an interesting environmental key word(s) and use the {jsonlite} package to query the API. Pick something high profile enough and over a large enough time frame that your query yields enough articles for an interesting examination.
