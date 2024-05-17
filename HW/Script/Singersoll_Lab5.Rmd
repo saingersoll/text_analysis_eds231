@@ -1,0 +1,256 @@
+---
+title: "Lab5"
+author: "Mateo Robbins"
+date: "2024-05-08"
+output: html_document
+---
+
+### Lab 5 Assignment
+
+1.  Using the data from your Nexis Uni query from Week 2, create a set of word embeddings. To do this, you'll essentially need to recreate the steps in today's example down through the chunk named "pmi". 
+
+```{r setup, include=FALSE}
+# Set the working directory to the folder containing the .docx files
+#knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+set.seed(99)
+
+library(LexisNexisTools)
+library(tidyverse)
+library(tidytext)
+library(textdata)
+library(stringr)
+library(dplyr)
+library(readr)
+library(widyr)         # for co-occurance counting
+library(irlba)
+library(broom) 
+library(here)
+library(gt)
+
+
+knitr::opts_knit$set(root.dir = here("Nexis", "tiktokban"))
+```
+
+#### Read in Data
+```{r load_articles}
+# List all .docx files in the directory
+post_files <- list.files(pattern = ".docx",
+                         full.names = TRUE,
+                         recursive = TRUE, 
+                         ignore.case = TRUE)
+
+# Print the first few file paths to verify
+#head(post_files) 
+```
+
+#### Object containing categorized article components
+
+```{r lnt_object}
+dat <- lnt_read(post_files)
+
+# Extract year from the date column using parse_date_time
+meta_df$year <- year(parse_date_time(meta_df$Newspaper, orders = c("mdy", "dmy", "ymd", "my", "dm", "md", "y", "m", "d")))
+
+# pull out respective table slots
+articles_df <- dat@articles
+paragraphs_df <- dat@paragraphs
+
+
+dat2 <- tibble(
+ id = articles_df$ID,
+ date = meta_df$Date,
+ headline = meta_df$Headline,
+ text = articles_df$Article
+)
+```
+
+#### Probability of Each Word
+
+```{r unigrams}
+# let's calculate the frequency of 
+unigram_probs <- dat2 %>% 
+  unnest_tokens(word, text) %>% 
+  anti_join(stop_words, by = 'word') %>% 
+  count(word, sort = TRUE) %>% 
+  mutate(p = n/sum(n))
+  
+unigram_probs
+```
+OK, so that tells us the probability of each word.
+
+#### Context Probability of Words (likelihood of words appearing within a 5 word window of each other)
+
+```{r make-skipgrams}
+skipgrams <- dat2 %>% 
+  # window of 5 word sequences using this function
+  unnest_tokens(ngram, text, toke = "ngrams", n = 5) %>% 
+  mutate(ngramID = row_number()) %>% 
+  tidyr::unite(skipgramID, id, ngramID) %>% 
+  # let's take a look at our output
+  unnest_tokens(word, ngram) %>% 
+  anti_join(stop_words)
+  
+skipgrams
+```
+
+#### Sum total pair appearances
+
+```{r pairwise_count}
+skipgram_probs  <- skipgrams %>% 
+  # count each pair of words in each skipID appears
+  # this is helping us identify context ques
+  widyr::pairwise_count(item = word, 
+                        feature = skipgramID,
+                        # Reduces data/ simplifies
+                        diag = FALSE,
+                        # this removes the duplicates 
+                        upper = FALSE) %>% 
+  # what is the probability of a given pair
+  # are within 5 words of each other in all of these articles
+  mutate(p = n/sum(n)) %>% 
+  # this shows us we're getting duplicate responses for flipped item1 and 2 occurances
+  arrange(-p)
+
+
+skipgram_probs
+```
+#### Normalize Pairwise Probabilities
+
+```{r norm-prob}
+normalized_probs <- skipgram_probs %>% 
+  rename(word1 = item1,
+         word2 = item2) %>% 
+  # combine unigram probabilities
+  # and 
+  left_join(unigram_probs %>% 
+              select(word1 = word, 
+                     p1 = p),
+                     by = 'word1'
+  ) %>% 
+  left_join(unigram_probs %>% 
+              select(word2 = word, 
+                     p2 = p),
+            by = 'word2'
+            ) %>% 
+  mutate(p_together = p/p1/p2)
+  
+normalized_probs[1:10, ]
+```
+#### Matrix Factorization
+```{r pmi}
+# co-occurance matrix
+pmi_matrix <- normalized_probs %>% 
+  # log of prop of 2 words occuring together
+  mutate(pmi = log10(p_together)) %>% 
+  # we know what pair each calculated value corresponds to
+  cast_sparse(word1, word2, pmi)
+
+# too many! we want 100 dims
+dim(pmi_matrix)
+```
+
+2.  Think of 3 important words in your data set. Calculate and plot the 10 most semantically similar words for each of them. Identify and interpret any interesting or surprising results.
+```{r syn_function}
+# all vectors, word of choice, og word to remove similarities later
+search_synonyms <- function(word_vectors,  selected_vector, original_word) {
+  
+  # define data
+  dat <- word_vectors %>% 
+  # compare two vectors using dot product
+    selected_vector
+  
+  similarities <- as.data.frame(dat) %>% 
+    tibble(token = rownames(dat), similarity = dat[,1]) %>% 
+    # remove og word so it isn't returned as similarity
+    filter(token != original_word) %>% 
+    arrage(-similarity) %>% 
+    select(token, similarity)
+  
+  return(similarities)
+}
+```
+
+
+```{r svd}
+# reference all non-zero elements of matric
+# replace all NA as zero
+pmi_matrix@x[is.na(pmi_matrix@x)] <- 0
+
+pmi_matrix
+# decomposition guessing / checking iteration to continually improve solution
+# rather than simply calculating
+# this can take a really long time with big data sets
+# in those cases, you may want to set the number of iterations here
+# this didn't fix my prob
+#remotes::install_version("Matrix", version = "1.6-4")
+#remotes::install_version("Matrix", version = "1.7-0")
+#library(Matrix)
+#install.packages("Matrix", dependencies = TRUE)
+
+
+pmi_svd <- irlba::irlba(pmi_matrix, 100, verbose = FALSE)
+
+word_vectors <- pmi_svd
+
+rownames(word_vectors) <- rownames(pmi_matrix)
+```
+
+
+```{r find-synonyms}
+social <- search_synonyms(word_vectors, word_vectors["social"], "social")
+
+
+security <- search_synonyms(word_vectors, word_vectors["security"], "security")
+
+
+data <- search_synonyms(word_vectors, word_vectors["data"], "data")
+```
+
+```{r plot-synonyms_social}
+social %>% 
+  mutate(selected = "social") %>% 
+  bind_rows(social %>% 
+              mutate(
+                selected = "security"
+              )) %>% 
+  group_by(by = selected) %>% 
+  top_n(15, similarity) %>% 
+  mutate(token = reorder(token, similarity)) %>% 
+  ggplot(aes(token = reorder(token, similarity, fill = selected))) +
+  geom_col(show_legend = FALSE) %>% 
+  facet_wrap(~selected, scales = "free") +
+  coord_flip()
+```
+
+```{r plot-synonyms_security}
+slip %>% 
+  mutate(selected = "security") %>% 
+  bind_rows(security%>% 
+              mutate(
+                selected = "security"
+              )) %>% 
+  group_by(by = selected) %>% 
+  top_n(15, similarity) %>% 
+  mutate(token = reorder(token, similarity)) %>% 
+  ggplot(aes(token = reorder(token, similarity, fill = selected))) +
+  geom_col(show_legend = FALSE) %>% 
+  facet_wrap(~selected, scales = "free") +
+  coord_flip()
+```
+
+3.  Assemble 3 word math equations that you think could be useful or interesting for exploring the meaning of key words or ideas in your data set.
+
+
+#### Pretrained Embeddings
+
+
+4.  Following the example in the SMLTR text (section 5.4), create a set of 100-dimensional GloVe word embeddings. These embeddings were trained by researchers at Stanford on 6 billion tokens from Wikipedia entries.
+
+Note: The embeddings .zip file is very large. You may have to increase your global timeout setting to download, ex: options(timeout=100)
+
+
+5.  Test them out with the canonical word math equation on the GloVe embeddings: "berlin" - "germany" + "france" = ?
+
+Hint: you'll need to convert the GloVe dataframe to a matrix and set the row names in order to use our synonym function.
+
+6.  Recreate parts 2 and 3 above using the the GloVe embeddings in place of the ones you made. How do they compare? What are the implications for applications of these embeddings?

@@ -124,6 +124,9 @@ dim(pmi_matrix)
 
 We do the singular value decomposition with irlba::irlba(). It's a "partial decomposition" as we are specifying a limited number of dimensions, in this case 100.
 
+R version 4.3.1
+matrix 1.6-4
+
 ```{r svd}
 # reference all non-zero elements of matric
 # replace all NA as zero
@@ -135,7 +138,7 @@ pmi_matrix
 # this can take a really long time with big data sets
 # in those cases, you may want to set the number of iterations here
 # this didn't fix my prob
-remotes::install_version("Matrix", version = "1.6-5")
+remotes::install_version("Matrix", version = "1.6-4")
 
 
 remotes::install_version("Matrix", version = "1.7-0")
